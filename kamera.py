@@ -1,70 +1,66 @@
-import telebot
-import requests
 import cv2
-import numpy as np
-import time
+import telebot
 
-# Replace 'YOUR_TELEGRAM_BOT_TOKEN' with your bot token
-bot = telebot.TeleBot('your_token')
-chat_id = 'your_chat_id'  # Замените на ваш Chat ID
+# Замените 'YOUR_TELEGRAM_BOT_TOKEN' на ваш токен бота
+bot = telebot.TeleBot('6038856046:AAHFYptTYuVdUvgtgsre6343yapymwCKOeK6f5ClxMP51c')
+chat_id = '119925245432599157'  # Замените на ваш Chat ID
+# Флаг для отслеживания движения
+motion_tracking = False
 
-# URL for accessing the video stream from the camera
-camera_url = 'http://your_ip_adres:your_port/video'
-
-# Flag to track motion detection
-motion_detected = False
-
-# Handler for the /start command
+# Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "Hello! I'm a motion detection bot. Use the /motion command to start motion tracking.")
+    bot.reply_to(message, "Привет! Я бот для отслеживания движения. Используй команду /motion для запуска отслеживания.")
 
-# Handler for the /motion command
+# Обработчик команды /motion
 @bot.message_handler(commands=['motion'])
 def motion(message):
-    global motion_detected
-    if motion_detected:
-        bot.reply_to(message, "Motion detection is already running.")
+    global motion_tracking
+    if motion_tracking:
+        bot.reply_to(message, "Отслеживание движения уже запущено.")
     else:
-        motion_detected = True
-        bot.reply_to(message, "Motion detection started.")
+        motion_tracking = True
+        bot.reply_to(message, "Отслеживание движения запущено.")
         start_motion_tracking()
 
-# Function for motion tracking
+# Функция для отслеживания движения
 def start_motion_tracking():
-    while motion_detected:
-        stream = requests.get(camera_url, stream=True)
-        if stream.status_code == 200:
-            bytes_data = bytes()
-            for chunk in stream.iter_content(chunk_size=1024):
-                bytes_data += chunk
-                a = bytes_data.find(b'\xff\xd8')
-                b = bytes_data.find(b'\xff\xd9')
-                if a != -1 and b != -1:
-                    jpg = bytes_data[a:b + 2]
-                    bytes_data = bytes_data[b + 2:]
-                    try:
-                        image = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-                    except cv2.error:
-                        continue
+    cap = cv2.VideoCapture(0)
+    previous_frame = None
+    motion_detected = False
 
-                    # Process the image as needed
-                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                    # ...
+    while motion_tracking:
+        _, frame = cap.read()
+        current_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                    if motion_detected:
-                        cv2.imwrite("motion_detected.jpg", image)
-                        with open("motion_detected.jpg", "rb") as photo:
-                            bot.send_photo(chat_id, photo)
+        if previous_frame is not None:
+            frame_diff = cv2.absdiff(previous_frame, current_frame)
+            _, threshold = cv2.threshold(frame_diff, 30, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        time.sleep(0.1)
+            if len(contours) > 0:
+                motion_detected = True
 
-# Handler for the /stop command
+        previous_frame = current_frame
+
+        if motion_detected:
+            # Если обнаружено движение, отправляем фотографию
+            cv2.imwrite("motion_detected.jpg", frame)
+            with open("motion_detected.jpg", "rb") as photo:
+                bot.send_photo(chat_id, photo)
+            motion_detected = False
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+# Обработчик команды /stop
 @bot.message_handler(commands=['stop'])
 def stop(message):
-    global motion_detected
-    motion_detected = False
-    bot.reply_to(message, "Motion detection stopped.")
-
-# Run the bot
+    global motion_tracking
+    motion_tracking = False
+    bot.reply_to(message, "Отслеживание движения остановлено.")
+# Запуск бота
 bot.polling()
